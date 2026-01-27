@@ -1,0 +1,17 @@
+
+{
+  "short_name": "VOM Inventario",
+  "name": "VOM SAS - Inventario de Ambulancia",
+  "icons": [
+    {
+      "src": "https://cdn-icons-png.flaticon.com/512/2966/2966327.png",
+      "sizes": "512x512",
+      "type": "image/png",
+      "purpose": "any maskable"
+    }
+  ],
+  "start_url": ".",
+  "display": "standalone",
+  "theme_color": "#1d4ed8",
+  "background_color": "#f8fafc"
+}

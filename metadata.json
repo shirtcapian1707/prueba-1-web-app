@@ -1,0 +1,8 @@
+{
+  "name": " web app VOM SAS 1.1-1",
+  "description": "Una aplicación profesional para la gestión digital del inventario diario de ambulancias básicas, cumpliendo con la Resolución 3100. Permite el seguimiento de insumos, medicamentos y equipos biomédicos por día del mes.",
+  "requestFramePermissions": [
+    "camera",
+    "microphone"
+  ]
+}
