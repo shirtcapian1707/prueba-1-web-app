@@ -5,6 +5,7 @@ import {
   InventoryState, InventoryHeader, User as UserType, SupplyRequest 
 } from './types';
 import { API_URL } from './config';
+import { supabase } from './lib/supabase'; // 1. Importación de Supabase
 import LoginModule from './LoginModule';
 import AdminModule from './AdminModule';
 import WarehouseModule from './WarehouseModule';
@@ -12,7 +13,6 @@ import MobileModule from './MobileModule';
 import DriverModule from './DriverModule';
 
 const GLOBAL_DATA_KEY = 'vom_global_inventory';
-const GLOBAL_REQUESTS_KEY = 'vom_global_requests';
 const USERS_STORAGE_KEY = 'vom_users_list';
 
 const getCurrentMonth = () => new Date().toLocaleString('es-ES', { month: 'long' }).toUpperCase();
@@ -32,27 +32,63 @@ const App: React.FC = () => {
     return saved ? JSON.parse(saved) : INITIAL_USERS;
   });
 
+  const [globalInventory, setGlobalInventory] = useState<Record<string, InventoryState>>({});
+  const [globalRequests, setGlobalRequests] = useState<SupplyRequest[]>([]);
+
+  // 3. Activar el Tiempo Real (La Magia)
   useEffect(() => {
-    localStorage.setItem(USERS_STORAGE_KEY, JSON.stringify(users));
-  }, [users]);
+    // 1. Cargar los datos que ya están guardados al abrir la app
+    const cargarDatos = async () => {
+      try {
+        const { data, error } = await supabase.from('inventarios_ambulancias').select('*');
+        if (error) throw error;
+        if (data) {
+          // Convertimos el formato de la base de datos al formato de tu App
+          const inventarioActualizado = data.reduce((acc, item) => ({
+            ...acc, 
+            [item.id]: item.datos
+          }), {});
+          setGlobalInventory(inventarioActualizado);
+        }
+      } catch (err) {
+        console.error("Error cargando datos:", err);
+      }
+    };
 
-  const [globalInventory, setGlobalInventory] = useState<Record<string, InventoryState>>(() => {
-    const saved = localStorage.getItem(GLOBAL_DATA_KEY);
-    return saved ? JSON.parse(saved) : {};
-  });
+    cargarDatos();
 
-  const [globalRequests, setGlobalRequests] = useState<SupplyRequest[]>(() => {
-    const saved = localStorage.getItem(GLOBAL_REQUESTS_KEY);
-    return saved ? JSON.parse(saved) : [];
-  });
+    // 2. Escuchar la base de datos. Si algo cambia, la app se actualiza sola.
+    const canal = supabase
+      .channel('cambios-reales')
+      .on('postgres_changes', 
+          { event: '*', schema: 'public', table: 'inventarios_ambulancias' }, 
+          () => { cargarDatos(); }
+      )
+      .subscribe();
 
-  useEffect(() => {
-    localStorage.setItem(GLOBAL_DATA_KEY, JSON.stringify(globalInventory));
-  }, [globalInventory]);
+    return () => {
+      supabase.removeChannel(canal);
+    };
+  }, []);
 
-  useEffect(() => {
-    localStorage.setItem(GLOBAL_REQUESTS_KEY, JSON.stringify(globalRequests));
-  }, [globalRequests]);
+  // 2. Cambiar la forma en que se guardan los datos (Guardado en la Nube)
+  const guardarInventarioEnNube = async (idAmbulancia: string, datos: any) => {
+    try {
+      const { error } = await supabase
+        .from('inventarios_ambulancias')
+        .upsert({ 
+          id: idAmbulancia, 
+          datos: datos, 
+          ultima_actualizacion: new Date() 
+        });
+
+      if (error) throw error;
+      console.log("Datos sincronizados con éxito en la nube");
+    } catch (error) {
+      console.error("Error al sincronizar:", error);
+      showNotification("Error al sincronizar con la nube", "error");
+    }
+  };
 
   const showNotification = (text: string, type: 'success' | 'error' = 'success') => {
     setSaveMessage({ text, type });
@@ -65,30 +101,14 @@ const App: React.FC = () => {
 
   const handleUpdateGlobalInventory = async (userId: string, state: InventoryState) => {
     const newState = { ...state, lastSaved: new Date().toISOString() };
-    const updatedGlobal = { ...globalInventory, [userId]: newState };
-    setGlobalInventory(updatedGlobal);
     
-    // --- SINCRONIZACIÓN CON SERVIDOR FASTAPI ---
-    try {
-      const response = await fetch(`${API_URL}/api/sync-inventory`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          userId,
-          timestamp: newState.lastSaved,
-          data: newState
-        })
-      });
-
-      if (response.ok) {
-        showNotification("Datos guardados y sincronizados con éxito");
-      } else {
-        showNotification("Guardado local OK, pero error en servidor central", "error");
-      }
-    } catch (error) {
-      console.error("Sync error:", error);
-      showNotification("Guardado local OK (Servidor Offline)", "error");
-    }
+    // Actualización local para UI instantánea
+    setGlobalInventory(prev => ({ ...prev, [userId]: newState }));
+    
+    // Sincronización en la nube (Supabase)
+    await guardarInventarioEnNube(userId, newState);
+    
+    showNotification("Inventario sincronizado");
   };
 
   if (!currentUser) {
